@@ -4,19 +4,14 @@
 #[macro_use] extern crate log;
 #[macro_use] extern crate cfg_if;
 
-extern crate acpi;
 extern crate num_complex;
-//extern crate mish;
 extern crate alloc;
-// #[cfg(target_feature = "sse2")]
 extern crate immintrin;
-extern crate aligned_vec;
 
 use core::mem;
 use num_complex::Complex32;
 use alloc::vec::Vec;
 
-pub mod trig;
 pub mod test;
 pub mod fft;
 pub mod kernel;
