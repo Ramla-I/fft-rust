@@ -1,9 +1,7 @@
 use num_complex::*;
 use alloc::vec::Vec;
 use alloc::boxed::Box;
-use super::trig::*;
 use super::kernel::*;
-// use aligned_vec::aligned_alloc;
 use immintrin::xmmintrin::*;
 use super::allocate_aligned_vec_32;
 
