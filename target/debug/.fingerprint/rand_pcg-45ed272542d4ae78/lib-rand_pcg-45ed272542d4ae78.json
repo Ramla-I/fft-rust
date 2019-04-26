@@ -1,0 +1,1 @@
+{"rustc":17280368720609977121,"features":"[]","target":11973260267564276155,"profile":11870183705523825133,"path":7675320791283061516,"deps":[["rand_core v0.4.0","rand_core",3492044761533795152]],"local":[{"Precalculated":"0.1.2"}],"rustflags":["-C","target-feature=+avx"],"edition":"Edition2015"}

@@ -1,9 +1,11 @@
 use num_complex::*;
-use alloc::vec::Vec;
-use alloc::boxed::Box;
+// use std::vec::Vec;
+// use std::boxed::Box;
+
 use super::kernel::*;
-use immintrin::xmmintrin::*;
-use super::allocate_aligned_vec_32;
+use super::allocate_aligned_vec_128;
+use libm::F32Ext;
+use std::arch::x86_64::{_mm256_load_ps, _mm256_store_ps};
 
 /// The forward FFT transform.
 pub const MUFFT_FORWARD: i32 = -1;
@@ -120,44 +122,29 @@ pub struct mufft_plan_1d
 pub fn twiddle(direction: i32, k: u32, p: u32) -> Complex32
 {
     let phase = (M_PI * direction as f32 * k as f32) / p as f32;
-    //debug!("phase:{}    re:{}   im:{}", phase, cos(phase), sin(phase));
-    return Complex {re: cos(phase), im: sin(phase)};
+    return Complex {re: F32Ext::cos(phase), im: F32Ext::sin(phase)};
 }
 
-pub fn build_twiddles(n: u32, direction: i32) -> Vec<Complex32>
+pub fn build_twiddles(n: u32, direction: i32, mut twiddles: &mut Vec<Complex32>)
 {
-    let mut twiddles: Vec<Complex32> = Vec::new();
-    let _ = allocate_aligned_vec_32(n as usize, &mut twiddles);
+    let _ = allocate_aligned_vec_128(n as usize, &mut twiddles);
     let mut p: u32 = 1; 
-    twiddles.clear();
-    //let mut j: u32 = 0;
+    let mut j: u32 = 0;
 
     while p < n 
     {
         for k in 0..p
         {
-            // twiddles[(k + j) as usize] = twiddle(direction, k, p);
-
-            twiddles.push( twiddle(direction, k, p));
+            twiddles[(k + j) as usize] = twiddle(direction, k, p);
         }
         
-        //if p == 2 { j += 3; }
-        //else { j += p;}
+        if p == 2 { j += 3; }
+        else { j += p;}
 
         p = p << 1;
     }
-
-    /* for i in 0..n {
-        debug!("{}", twiddles[i as usize]);
-    } */
-    
-    twiddles
 }
 
-
-pub fn test_twiddles(_: Option<u64>) {
-    let _a = build_twiddles(64, -1);
-}
 
 
 /// \brief Adds a new FFT step to either \ref mufft_step_1d or \ref mufft_step_2d.
@@ -181,15 +168,6 @@ pub fn add_step(steps: &mut Vec<mufft_step_1d>, num_steps: &mut u32, step: & fft
             twiddle_offset += 1;
         }
     }
-
-    /* struct mufft_step_base *new_steps = realloc(*steps, (*num_steps + 1) * sizeof(*new_steps));
-    if (new_steps == NULL)
-    {
-        return false;
-    } 
-
-    *steps = new_steps;
-    */
 
     steps.push (mufft_step_1d{
         func: step.func,
@@ -217,7 +195,7 @@ pub fn build_plan_1d(steps: &mut Vec<mufft_step_1d> , num_steps: &mut u32, N: u3
 
         MUFFT_INVERSE => step_flags |= MUFFT_FLAG_DIRECTION_INVERSE | MUFFT_FLAG_NO_ZERO_PAD_UPPER_HALF,
 
-        _ => error!("wrong direction value"),
+        _ => println!("wrong direction value"),
 
     }
 
@@ -228,12 +206,10 @@ pub fn build_plan_1d(steps: &mut Vec<mufft_step_1d> , num_steps: &mut u32, N: u3
     
     while radix > 1
     {
-        // debug!("While loop");
         let mut found: bool = false;
 
         // Find first (optimal?) routine which can do work.
-        for i in 0..SIZE_FFT_1D_TABLE 
-        {   //debug!("i: {}", i);
+        for i in 0..SIZE_FFT_1D_TABLE {
             let mut step = & fft_1d_table[i];
 
             if radix % step.radix == 0 &&
@@ -244,8 +220,6 @@ pub fn build_plan_1d(steps: &mut Vec<mufft_step_1d> , num_steps: &mut u32, N: u3
                 // Ugly casting, but add_step_1d and add_step_2d are ABI-wise exactly the same, and we don't have templates :(
                 if add_step(steps, num_steps, &step, p)
                 {
-                    // debug!("step no: {}", i);
-                    // debug!("radix: {}, N: {}, p: {}", radix, N, p);
                     found = true;
                     radix /= step.radix;
                     p *= step.radix;
@@ -258,7 +232,6 @@ pub fn build_plan_1d(steps: &mut Vec<mufft_step_1d> , num_steps: &mut u32, N: u3
         {
             return false;
         }
-        // debug!("radix: {}", radix);
     }
 
     return true;
@@ -279,7 +252,8 @@ pub fn mufft_create_plan_1d_c2c(N: u32, direction: i32, flags: u32) -> Option<mu
         twiddles: Vec::with_capacity(1), // don't really need this
     };
 
-    plan.twiddles = build_twiddles(N, direction);
+
+    build_twiddles(N, direction, &mut plan.twiddles);
 
     if !build_plan_1d(&mut plan.steps, &mut plan.num_steps, N, direction, flags)
     {
@@ -290,92 +264,42 @@ pub fn mufft_create_plan_1d_c2c(N: u32, direction: i32, flags: u32) -> Option<mu
     return Some(plan);
 }
 
-// #[cfg(target_feature = "sse2")]
-pub fn execute_function(func: u8, mut output: &mut Vec<Complex32>, input: &mut Vec<Complex32>, twiddles: &Vec<Complex32>, 
+pub fn execute_function(func: u8, mut output: &mut [Complex32], input: &mut [Complex32], twiddles: &[Complex32], 
     twiddle_offset: u32, p:u32, samples: u32) {
 
         match func {
             0 => {
-                // debug!("mufft_forward_radix8_p1");
                 mufft_forward_radix8_p1(&mut output, input, twiddles, twiddle_offset, p, samples);
             },
-            1 =>  debug!("mufft_forward_radix4_p1"),
-            2 =>  debug!("mufft_radix2_p1"),
-            3 =>  debug!("mufft_forward_half_radix8_p1"),
-            4 =>  debug!("mufft_forward_half_radix4_p1"),
-            5 =>  debug!("mufft_radix2_half_p1"),
-            6 =>  debug!("mufft_forward_radix2_p2"),
-            7 =>  debug!("mufft_inverse_radix8_p1"),
-            8 =>  debug!("mufft_inverse_radix4_p1"),
-            9 =>  debug!("mufft_inverse_radix2_p2"),
+            1 =>  println!("mufft_forward_radix4_p1"),
+            2 =>  println!("mufft_radix2_p1"),
+            3 =>  println!("mufft_forward_half_radix8_p1"),
+            4 =>  println!("mufft_forward_half_radix4_p1"),
+            5 =>  println!("mufft_radix2_half_p1"),
+            6 =>  println!("mufft_forward_radix2_p2"),
+            7 =>  println!("mufft_inverse_radix8_p1"),
+            8 =>  println!("mufft_inverse_radix4_p1"),
+            9 =>  println!("mufft_inverse_radix2_p2"),
             10 => {
-                // debug!("mufft_radix8_generic");
                 mufft_radix8_generic(&mut output, input, twiddles, twiddle_offset, p, samples);
             },
             11 =>  {
                 mufft_radix4_generic(&mut output, input, twiddles, twiddle_offset, p, samples);
             }
             12 => {
-                // debug!("mufft_radix2_generic");
                 mufft_radix2_generic(&mut output, input, twiddles, twiddle_offset, p, samples);
             },
-            _ =>  debug!("Not a valid function!!!"),
+            _ =>  println!("Not a valid function!!!"),
         }
 
 
 }
 
-pub fn swap (a: Box<Vec<Complex32>>, b: Box<Vec<Complex32>>) -> (Box<Vec<Complex32>>, Box<Vec<Complex32>>) {
-    /* let a_ptr = &mut a[0] as *mut Complex32;
-    let a_len = a.len();
-    let a_cap = a.capacity();
-
-    let b_ptr = &mut b[0] as *mut Complex32;
-    let b_len = b.len();
-    let b_cap = b.capacity(); */
-
-    let a_ptr = Box::into_raw(a);
-    let b_ptr = Box::into_raw(b);
-
-    unsafe {
-        /* b = Box::new(Vec::from_raw_parts(a_ptr, a_len, a_cap));
-        a = Box::new(Vec::from_raw_parts(b_ptr, b_len, b_cap)); */
-        return (Box::from_raw(b_ptr), Box::from_raw(a_ptr));
-    }
-}
-
-pub fn swap_new (a: &mut Vec<Complex32>, b: &mut Vec<Complex32>){
-    let a_ptr = &mut a[0] as *mut Complex32;
-    let a_len = a.len();
-    let a_cap = a.capacity();
-
-    let b_ptr = &mut b[0] as *mut Complex32;
-    let b_len = b.len();
-    let b_cap = b.capacity(); 
-
-    // let a_ptr = Box::into_raw(a);
-    // let b_ptr = Box::into_raw(b);
-
-    unsafe {
-        /* b = Box::new(Vec::from_raw_parts(a_ptr, a_len, a_cap));
-        a = Box::new(Vec::from_raw_parts(b_ptr, b_len, b_cap)); */
-        // return (Box::from_raw(b_ptr), Box::from_raw(a_ptr));
-    }
-}
-
-// #[cfg(target_feature = "sse2")]
-pub fn mufft_execute_plan_1d(plan:  &mufft_plan_1d, mut output: &mut Vec<Complex32>, mut input: &mut Vec<Complex32>) {
+pub fn mufft_execute_plan_1d(plan:  &mufft_plan_1d, output: &mut [Complex32], input: &mut [Complex32]) {
     let pt = &plan.twiddles;
     let N = plan.N;
     let steps: u32 = plan.num_steps;
 
-    // // We want final step to write to output.
-    // if (steps & 1) == 1
-    // {
-    //     let(b,a) = swap(out, in_);
-    //     out = b;
-    //     in_ = a;
-    // }
 
     //TODO: 1 step FFT not working
     let first_step = &plan.steps[0]; 
@@ -396,16 +320,13 @@ pub fn mufft_execute_plan_1d(plan:  &mufft_plan_1d, mut output: &mut Vec<Complex
     }
     //Output is stored in input vector
     if step_no % 2 != 0 {
-        let input_ptr = &input[0].re as *const f32;
-        let output_ptr = &mut output[0].re as *mut f32;
-
-        let mut i: isize = 0;
-        while i < N as isize * 2 {
+        let mut i = 0;
+        while i < N {
             unsafe {
-                let w = _mm_loadu_ps(input_ptr.offset(i));
-                _mm_storeu_ps(output_ptr.offset(i), w);
+                let w = _mm256_load_ps(&input[i as usize].re as *const f32);
+                _mm256_store_ps(&mut output[i as usize].re as *mut f32, w);
             }
-            i += 4;
+            i += VSIZE;
         } 
     }
 }
