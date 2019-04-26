@@ -1,9 +1,10 @@
 use num_complex::*;
-use alloc::vec::Vec;
-use alloc::boxed::Box;
+// use alloc::vec::Vec;
+// use alloc::boxed::Box;
 use super::kernel::*;
 use immintrin::xmmintrin::*;
-use super::allocate_aligned_vec_32;
+use super::allocate_aligned_vec_64;
+use libm::F32Ext;
 
 /// The forward FFT transform.
 pub const MUFFT_FORWARD: i32 = -1;
@@ -121,13 +122,12 @@ pub fn twiddle(direction: i32, k: u32, p: u32) -> Complex32
 {
     let phase = (M_PI * direction as f32 * k as f32) / p as f32;
     //debug!("phase:{}    re:{}   im:{}", phase, cos(phase), sin(phase));
-    return Complex {re: cos(phase), im: sin(phase)};
+    return Complex {re: F32Ext::cos(phase), im: F32Ext::sin(phase)};
 }
 
-pub fn build_twiddles(n: u32, direction: i32) -> Vec<Complex32>
+pub fn build_twiddles(n: u32, direction: i32, mut twiddles: &mut Vec<Complex32>) 
 {
-    let mut twiddles: Vec<Complex32> = Vec::new();
-    let _ = allocate_aligned_vec_32(n as usize, &mut twiddles);
+    let _ = allocate_aligned_vec_64(n as usize, &mut twiddles);
     let mut p: u32 = 1; 
     twiddles.clear();
     //let mut j: u32 = 0;
@@ -151,12 +151,6 @@ pub fn build_twiddles(n: u32, direction: i32) -> Vec<Complex32>
         debug!("{}", twiddles[i as usize]);
     } */
     
-    twiddles
-}
-
-
-pub fn test_twiddles(_: Option<u64>) {
-    let _a = build_twiddles(64, -1);
 }
 
 
@@ -279,7 +273,7 @@ pub fn mufft_create_plan_1d_c2c(N: u32, direction: i32, flags: u32) -> Option<mu
         twiddles: Vec::with_capacity(1), // don't really need this
     };
 
-    plan.twiddles = build_twiddles(N, direction);
+    build_twiddles(N, direction, &mut plan.twiddles);
 
     if !build_plan_1d(&mut plan.steps, &mut plan.num_steps, N, direction, flags)
     {

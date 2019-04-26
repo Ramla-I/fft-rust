@@ -1,11 +1,11 @@
 use num_complex::*;
-use alloc::vec::Vec;
-use core::mem::transmute;
+// use alloc::vec::Vec;
+use std::mem::transmute;
 
 const M_SQRT1_2: f32 = 0.707106781186547524401;
 
 cfg_if! { if #[cfg(target_feature = "avx")] {
-    use core::arch::x86_64::*;
+    use std::arch::x86_64::*;
 
     const VSIZE: u32 = 4; // Complex numbers per vector
 

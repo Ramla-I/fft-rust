@@ -1,0 +1,1 @@
+{"rustc":17280368720609977121,"features":"[\"alloc\", \"std\"]","target":14134132449596365798,"profile":11870183705523825133,"path":12642494607544853955,"deps":[],"local":[{"Precalculated":"0.4.0"}],"rustflags":["-C","target-feature=+avx"],"edition":"Edition2015"}
